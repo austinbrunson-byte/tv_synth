@@ -1,0 +1,230 @@
+:root {
+  --ink: #000;
+  --paper: #fff;
+  --line: #000;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Courier New", ui-monospace, monospace;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ---------- Top bar / logo ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 24px;
+  border-bottom: 3px solid var(--line);
+}
+
+.logo {
+  width: 96px;
+  height: 72px;
+  border: 2px solid var(--line);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.bars {
+  display: flex;
+  height: 75%;
+}
+.bars.bars-lower { height: 25%; }
+.bars span { flex: 1; }
+
+.titleblock h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: 6px;
+  font-weight: 700;
+}
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+/* ---------- Toggles (music bed + output) ---------- */
+.toggles {
+  margin-left: auto;
+  display: flex;
+  gap: 22px;
+}
+.output {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.output-label {
+  font-size: 10px;
+  letter-spacing: 3px;
+}
+.toggle {
+  display: flex;
+  border: 2px solid var(--line);
+}
+.toggle .opt {
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 2px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border: none;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.toggle .opt + .opt { border-left: 2px solid var(--line); }
+.toggle .opt.is-on { background: var(--ink); color: var(--paper); }
+
+/* ---------- Main ---------- */
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.panel {
+  padding: 28px 24px;
+}
+
+.params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  justify-content: center;
+}
+
+.knob {
+  width: 120px;
+  text-align: center;
+  user-select: none;
+}
+
+.knob .dial {
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 8px;
+  border: 3px solid var(--line);
+  border-radius: 50%;
+  position: relative;
+  cursor: ns-resize;
+  background: var(--paper);
+  touch-action: none;
+}
+
+.knob .dial::after {
+  /* indicator line */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 3px;
+  height: 34px;
+  background: var(--line);
+  transform-origin: 50% 36px;
+  transform: translateX(-50%) rotate(var(--angle, -135deg));
+}
+
+.knob .label {
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.knob .value {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* ---------- Keyboard ---------- */
+.keyboard-wrap {
+  padding: 12px 24px 28px;
+}
+
+.keyboard {
+  position: relative;
+  display: flex;
+  height: 200px;
+  max-width: 900px;
+  margin: 0 auto;
+  border: 3px solid var(--line);
+}
+
+.key {
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.key.white {
+  flex: 1;
+  background: var(--paper);
+  border-right: 2px solid var(--line);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 10px;
+}
+.key.white:last-child { border-right: none; }
+
+.key.black {
+  position: absolute;
+  top: 0;
+  width: 6.2%;
+  height: 62%;
+  background: var(--ink);
+  color: var(--paper);
+  border: 2px solid var(--line);
+  z-index: 2;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  font-size: 10px;
+}
+
+.key .kb {
+  font-size: 11px;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+
+.key.active { background: #000; color: #fff; }
+.key.black.active { background: #555; }
+
+.hint {
+  text-align: center;
+  font-size: 11px;
+  margin-top: 14px;
+  letter-spacing: 1px;
+}
+kbd {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin: 0 1px;
+  font-size: 10px;
+}
+
+@media (max-width: 640px) {
+  .titleblock h1 { font-size: 24px; letter-spacing: 3px; }
+  .keyboard { height: 150px; }
+}

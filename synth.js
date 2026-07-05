@@ -1,0 +1,657 @@
+// ============================================================
+// TV SYNTH — broadcast sound effects generator
+//
+// The knobs are NOT synth parameters. Each one is a *cue* — the thing a
+// TV show reaches for at that moment — and it moves a whole bundle of
+// synthesis at once. A single key press is a little broadcast sting whose
+// character is the blend of all the cues.
+//
+//   DRAMA          the soap-opera "dun dun DUNNN": a minor stab, low brass
+//                  swell, a sub boom that drops in like an impact, and a
+//                  long tail of reverb.
+//   INTRIGUE       detective-show unease: sparse metallic bell + a tritone
+//                  that shouldn't be there, wavering vibrato, cold resonance.
+//   COMING UP NEXT the promo stinger: an upward pitch riser, a noise whoosh,
+//                  a bright brass octave stacked on top, hard fast attack.
+//   VIBE           the mood dial: cold/tense/thin at the bottom, warm mellow
+//                  lounge-bumper at the top — and it decides whether the
+//                  stacked harmony leans minor (tense) or major (easy).
+//   BUDGET         production value: public-access cheap square + grit + mono
+//                  at the bottom, lush wide detuned strings + polish at the top.
+//   VOLUME         master output.
+// ============================================================
+
+const PARAMS = [
+  { id: 'drama',   label: 'Drama',           default: 55 },
+  { id: 'intrigue',label: 'Intrigue',        default: 40 },
+  { id: 'next',    label: 'Coming Up Next',  default: 30 },
+  { id: 'vibe',    label: 'Vibe',            default: 50 },
+  { id: 'budget',  label: 'Budget',          default: 60 },
+  { id: 'volume',  label: 'Volume',          default: 70 },
+];
+
+const state = {};
+PARAMS.forEach(p => (state[p.id] = p.default));
+state.output = 'hdmi'; // 'hdmi' (clean, compressed) | 'rca' (light bitcrush)
+
+// ---- Audio graph -----------------------------------------------------------
+//   dryBus -> budgetDrive -> crush -> outTone -> preMaster
+//   preMaster -> comp -> master -> speakers
+//   preMaster -> reverb -> reverbGain -> comp   (wet folds into the comp too)
+let ac = null;
+let master = null;      // master gain (volume)
+let dryBus = null;      // voices sum here
+let budgetDrive = null; // waveshaper — grit for low BUDGET
+let crush = null;       // waveshaper — RCA bitcrush (bypassed for HDMI)
+let outTone = null;     // lowpass — RCA analog bandwidth rolloff
+let preMaster = null;   // sum feeding comp + reverb
+let comp = null;        // output compressor (hard for HDMI, soft for RCA)
+let reverb = null;      // convolver tail
+let reverbGain = null;  // wet amount
+let musicBus = null;    // background music sum
+let duckGain = null;    // ducks the music when the synth plays
+
+function initAudio() {
+  if (ac) return;
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+
+  master = ac.createGain();
+  master.connect(ac.destination);
+
+  dryBus = ac.createGain();
+  budgetDrive = ac.createWaveShaper();
+  budgetDrive.oversample = '2x';
+  crush = ac.createWaveShaper();
+  outTone = ac.createBiquadFilter();
+  outTone.type = 'lowpass';
+  preMaster = ac.createGain();
+  comp = ac.createDynamicsCompressor();
+
+  dryBus.connect(budgetDrive);
+  budgetDrive.connect(crush);
+  crush.connect(outTone);
+  outTone.connect(preMaster);
+  preMaster.connect(comp);
+  comp.connect(master);
+
+  reverb = ac.createConvolver();
+  reverb.buffer = makeImpulse(3.2, 2.4);
+  reverbGain = ac.createGain();
+  preMaster.connect(reverb);
+  reverb.connect(reverbGain);
+  reverbGain.connect(comp);
+
+  // Background music bed: its own bus, ducked when the synth plays.
+  musicBus = ac.createGain();
+  musicBus.gain.value = 0.5;
+  duckGain = ac.createGain();
+  duckGain.gain.value = 1;
+  musicBus.connect(duckGain);
+  duckGain.connect(comp); // shares the output compressor with the synth
+
+  applyGlobalParams();
+}
+
+// Amplitude-quantizing curve = genuine (light) bit-crush. `levels` lower = crunchier.
+function makeCrushCurve(levels) {
+  const n = 2048;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.round(x * levels) / levels;
+  }
+  return curve;
+}
+
+// Exponentially-decaying noise impulse response for the reverb tail.
+function makeImpulse(seconds, decay) {
+  const rate = ac.sampleRate;
+  const len = Math.max(1, Math.floor(rate * seconds));
+  const buf = ac.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+    }
+  }
+  return buf;
+}
+
+// Soft-clip curve. `amount` 0 = clean, higher = more crunch (cheap gear).
+function makeDriveCurve(amount) {
+  const k = amount * 40;
+  const n = 1024;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = (1 + k) * x / (1 + k * Math.abs(x));
+  }
+  return curve;
+}
+
+const n01 = v => v / 100;
+
+// Global (non-per-note) parameter application.
+function applyGlobalParams() {
+  if (!ac) return;
+  const t = ac.currentTime;
+  master.gain.setTargetAtTime(n01(state.volume) * 0.85, t, 0.02);
+
+  // Cheap productions distort and lose their sparkle. Low BUDGET => more grit.
+  const lofi = 1 - n01(state.budget);
+  budgetDrive.curve = makeDriveCurve(lofi * 0.9);
+  preMaster.gain.setTargetAtTime(0.7 - lofi * 0.15, t, 0.02);
+
+  // Big rooms cost money and drama loves a tail. Wet from DRAMA + BUDGET polish.
+  const wet = n01(state.drama) * 0.55 + n01(state.budget) * 0.18;
+  reverbGain.gain.setTargetAtTime(wet, t, 0.02);
+
+  // OUTPUT: HDMI = clean full-band + firm compression (loud, clear, controlled).
+  //         RCA  = light bit-crush + rolled-off bandwidth + gentle compression.
+  if (state.output === 'rca') {
+    crush.curve = makeCrushCurve(24);           // light quantization
+    outTone.frequency.setTargetAtTime(7000, t, 0.03);
+    comp.threshold.setTargetAtTime(-14, t, 0.02);
+    comp.ratio.setTargetAtTime(2.5, t, 0.02);
+    comp.attack.setTargetAtTime(0.02, t, 0.02);
+    comp.release.setTargetAtTime(0.25, t, 0.02);
+  } else {
+    crush.curve = null;                          // bypass — pristine
+    outTone.frequency.setTargetAtTime(18000, t, 0.03);
+    comp.threshold.setTargetAtTime(-26, t, 0.02);
+    comp.ratio.setTargetAtTime(6, t, 0.02);
+    comp.attack.setTargetAtTime(0.003, t, 0.02);
+    comp.release.setTargetAtTime(0.12, t, 0.02);
+  }
+}
+
+// ---- Notes -----------------------------------------------------------------
+const BASE_MIDI = 60; // C4
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+const activeVoices = {}; // midi -> voice
+
+function buildVoice(midi) {
+  const drama    = n01(state.drama);
+  const intrigue = n01(state.intrigue);
+  const next     = n01(state.next);
+  const vibe     = n01(state.vibe);
+  const budget   = n01(state.budget);
+
+  const t = ac.currentTime;
+  const rootFreq = midiToFreq(midi);
+  const semi = s => rootFreq * Math.pow(2, s / 12);
+
+  const oscs = [];
+  const cleanup = []; // extra nodes to stop on release (LFOs, noise)
+
+  // Amp envelope target — one shared VCA all layers pass through.
+  const voiceGain = ac.createGain();
+  voiceGain.gain.value = 0;
+
+  // Filter shared by the tonal layers. VIBE = warmth (dark), NEXT = brightness,
+  // INTRIGUE + DRAMA add resonance/edge.
+  const filter = ac.createBiquadFilter();
+  filter.type = 'lowpass';
+  const baseCut = 350 + (1 - vibe) * 5200 + next * 4500;
+  const openCut = baseCut + 1800 + drama * 6000 + next * 6000;
+  filter.frequency.value = baseCut;
+  filter.Q.value = 0.7 + intrigue * 9 + drama * 3;
+  filter.connect(voiceGain);
+
+  // --- helper: one oscillator layer -------------------------------------
+  // glide: [startRatio, glideTime] for a pitch riser/fall. pan: -1..1.
+  const layer = (type, freq, gain, opts = {}) => {
+    const o = ac.createOscillator();
+    o.type = type;
+    o.frequency.value = freq * (opts.glide ? opts.glide[0] : 1);
+    if (opts.detune) o.detune.value = opts.detune;
+    if (opts.glide) o.frequency.linearRampToValueAtTime(freq, t + opts.glide[1]);
+
+    let node = o;
+    if (opts.pan) {
+      const p = ac.createStereoPanner();
+      p.pan.value = opts.pan;
+      o.connect(p);
+      node = p;
+    }
+    const g = ac.createGain();
+    g.gain.value = gain;
+    node.connect(g);
+    g.connect(opts.dry ? dryBus : filter);
+    o.start(t);
+    oscs.push(o);
+    return o;
+  };
+
+  // Riser applied to the "up front" tonal layers (the promo push).
+  const riser = next > 0.05 ? [Math.pow(2, -(0.3 + next * 0.9)), 0.02 + next * 0.12] : null;
+
+  // ---------------------------------------------------------------------
+  // ROOT — timbre set by BUDGET (cheap square <-> lush saw) and NEXT (brass).
+  // ---------------------------------------------------------------------
+  const rootType = budget < 0.33 ? 'square' : (next > 0.45 ? 'sawtooth' : 'triangle');
+  // Cheap gear drifts out of tune.
+  const detuneCheap = (1 - budget) * (Math.random() * 24 - 12);
+  layer(rootType, rootFreq, 0.5, { detune: detuneCheap, glide: riser });
+
+  // BUDGET width — extra detuned voices panned L/R = expensive stereo strings.
+  if (budget > 0.28) {
+    const spread = 6 + budget * 22;
+    layer('sawtooth', rootFreq, 0.22 * budget, { detune: +spread, pan: -0.6, glide: riser });
+    layer('sawtooth', rootFreq, 0.22 * budget, { detune: -spread, pan: +0.6, glide: riser });
+  }
+
+  // ---------------------------------------------------------------------
+  // DRAMA — the sting. Stacked harmony (minor unless VIBE warms it to major),
+  // fifth, a low brass-ish body, plus a sub "boom" that drops in like an impact.
+  // ---------------------------------------------------------------------
+  if (drama > 0.08) {
+    const thirdIsMajor = vibe > 0.55;            // VIBE decides the color
+    const third = thirdIsMajor ? 4 : 3;
+    layer('sawtooth', semi(third), 0.32 * drama, { glide: riser });
+    layer('sawtooth', semi(7),     0.30 * drama, { glide: riser });
+    // Impact boom: sine that pitch-drops fast, then a steady sub underneath.
+    const boom = ac.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(rootFreq, t);
+    boom.frequency.exponentialRampToValueAtTime(rootFreq / 2, t + 0.12);
+    const bg = ac.createGain();
+    bg.gain.value = 0.55 * drama;
+    boom.connect(bg); bg.connect(voiceGain);
+    boom.start(t);
+    oscs.push(boom);
+  }
+
+  // ---------------------------------------------------------------------
+  // COMING UP NEXT — bright octave brass on top + a noise whoosh transient.
+  // ---------------------------------------------------------------------
+  if (next > 0.1) {
+    layer('sawtooth', semi(12), 0.24 * next, { glide: riser });
+    if (next > 0.5) layer('square', semi(19), 0.12 * next, { glide: riser });
+
+    // Whoosh: short bandpassed noise sweeping upward, straight to the dry bus.
+    const dur = 0.28 + next * 0.25;
+    const nb = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
+    const nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const noise = ac.createBufferSource();
+    noise.buffer = nb;
+    const bp = ac.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(400, t);
+    bp.frequency.exponentialRampToValueAtTime(4000 + next * 4000, t + dur);
+    const ng = ac.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.linearRampToValueAtTime(0.18 * next, t + 0.03);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    noise.connect(bp); bp.connect(ng); ng.connect(dryBus);
+    noise.start(t);
+    cleanup.push({ stop: at => { try { noise.stop(at); } catch (e) {} } });
+  }
+
+  // ---------------------------------------------------------------------
+  // INTRIGUE — a cold metallic bell a tritone away, quiet and wavering.
+  // ---------------------------------------------------------------------
+  if (intrigue > 0.12) {
+    layer('triangle', semi(6),  0.16 * intrigue, { detune: +4 });
+    layer('sine',     semi(18), 0.10 * intrigue);
+  }
+
+  voiceGain.connect(dryBus);
+
+  // --- Wavering vibrato (INTRIGUE) --------------------------------------
+  if (intrigue > 0.1) {
+    const lfo = ac.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 2.5 + intrigue * 4.5;
+    const lg = ac.createGain();
+    lg.gain.value = intrigue * 14; // cents
+    lfo.connect(lg);
+    oscs.forEach(o => { if (o.detune) lg.connect(o.detune); });
+    lfo.start(t);
+    cleanup.push({ stop: at => { try { lfo.stop(at); } catch (e) {} } });
+  }
+
+  // --- Suspense tremolo (INTRIGUE shimmer, calmed by NEXT punch) ---------
+  const tremDepth = Math.max(0, intrigue * 0.12 - next * 0.06);
+  if (tremDepth > 0.005) {
+    const trem = ac.createOscillator();
+    trem.frequency.value = 4 + intrigue * 3;
+    const tg = ac.createGain();
+    tg.gain.value = tremDepth;
+    trem.connect(tg);
+    tg.connect(voiceGain.gain); // sums with the amp envelope
+    trem.start(t);
+    cleanup.push({ stop: at => { try { trem.stop(at); } catch (e) {} } });
+  }
+
+  // --- Amp + filter envelopes -------------------------------------------
+  // NEXT = punchy pluck (instant attack). DRAMA = orchestral swell + long tail.
+  const attack  = 0.003 + (1 - next) * (0.02 + drama * 0.55);
+  const peak    = 0.30;
+  const sustain = peak * (0.30 + next * 0.35);
+  const decayTo = attack + 0.12 + next * 0.25;
+  const release = 0.18 + drama * 2.6 + budget * 0.5;
+
+  voiceGain.gain.setValueAtTime(0, t);
+  voiceGain.gain.linearRampToValueAtTime(peak, t + attack);
+  voiceGain.gain.linearRampToValueAtTime(sustain, t + decayTo);
+
+  filter.frequency.setValueAtTime(baseCut, t);
+  filter.frequency.linearRampToValueAtTime(openCut, t + attack + 0.005);
+  filter.frequency.exponentialRampToValueAtTime(
+    Math.max(220, baseCut), t + decayTo + 0.35);
+
+  return { voiceGain, oscs, cleanup, release };
+}
+
+function noteOn(midi) {
+  initAudio();
+  if (ac.state === 'suspended') ac.resume();
+  if (activeVoices[midi]) return;
+  applyGlobalParams();
+  activeVoices[midi] = buildVoice(midi);
+  updateDuck();
+  highlightKey(midi, true);
+}
+
+function noteOff(midi) {
+  const v = activeVoices[midi];
+  if (!v) return;
+  delete activeVoices[midi];
+  const t = ac.currentTime;
+  v.voiceGain.gain.cancelScheduledValues(t);
+  v.voiceGain.gain.setValueAtTime(Math.max(0.0001, v.voiceGain.gain.value), t);
+  v.voiceGain.gain.linearRampToValueAtTime(0, t + v.release);
+  const stopAt = t + v.release + 0.05;
+  v.oscs.forEach(o => { try { o.stop(stopAt); } catch (e) {} });
+  v.cleanup.forEach(c => c.stop(stopAt));
+  updateDuck();
+  highlightKey(midi, false);
+}
+
+// Duck the music bed down while any synth voice is sounding; recover after.
+function updateDuck() {
+  if (!ac || !duckGain) return;
+  const playing = Object.keys(activeVoices).length > 0;
+  if (playing) {
+    duckGain.gain.setTargetAtTime(0.25, ac.currentTime, 0.03);  // fast dip
+  } else {
+    duckGain.gain.setTargetAtTime(1.0, ac.currentTime, 0.18);   // slow recover
+  }
+}
+
+// ============================================================
+// BACKGROUND MUSIC BED
+// A simple, friendly TV-bumper loop (I–vi–IV–V in C) built from a soft pad,
+// a light bass, and a gentle arpeggio. Scheduled with a look-ahead clock.
+// ============================================================
+let musicPlaying = false;
+let musicTimer = null;
+let musicStep = 0;      // sixteenth-note counter
+let nextStepTime = 0;
+
+const BPM = 96;
+const SIXTEENTH = 60 / BPM / 4;
+
+// One chord per bar (16 steps). Voiced as midi note sets.
+const PROG = [
+  [60, 64, 67, 71], // Cmaj7
+  [57, 60, 64, 67], // Am7
+  [65, 69, 72, 76], // Fmaj7
+  [55, 62, 65, 71], // G (with color)
+];
+
+function bedVoice(freq, time, dur, gain, type, opts = {}) {
+  const o = ac.createOscillator();
+  o.type = type;
+  o.frequency.value = freq;
+  const f = ac.createBiquadFilter();
+  f.type = 'lowpass';
+  f.frequency.value = opts.cutoff || 3000;
+  const g = ac.createGain();
+  const atk = opts.attack != null ? opts.attack : 0.02;
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.linearRampToValueAtTime(gain, time + atk);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+  o.connect(f); f.connect(g); g.connect(musicBus);
+  o.start(time);
+  o.stop(time + dur + 0.05);
+}
+
+function scheduleBedStep(step, time) {
+  const bar = Math.floor(step / 16) % PROG.length;
+  const chord = PROG[bar];
+  const beat = step % 16;
+
+  if (beat === 0) {
+    // Pad: whole-bar soft chord.
+    chord.forEach(m =>
+      bedVoice(midiToFreq(m), time, SIXTEENTH * 15, 0.05, 'triangle',
+               { attack: 0.08, cutoff: 2200 }));
+    // Bass root.
+    bedVoice(midiToFreq(chord[0] - 12), time, SIXTEENTH * 7, 0.14, 'sine',
+             { attack: 0.01, cutoff: 800 });
+  }
+  if (beat === 8) {
+    bedVoice(midiToFreq(chord[0] - 12), time, SIXTEENTH * 7, 0.11, 'sine',
+             { attack: 0.01, cutoff: 800 });
+  }
+  // Gentle arpeggio on the off-eighths.
+  if (beat % 2 === 0) {
+    const n = chord[(beat / 2) % chord.length] + 12;
+    bedVoice(midiToFreq(n), time, SIXTEENTH * 1.6, 0.045, 'triangle',
+             { attack: 0.005, cutoff: 3500 });
+  }
+}
+
+function musicLoop() {
+  while (nextStepTime < ac.currentTime + 0.12) {
+    scheduleBedStep(musicStep, nextStepTime);
+    nextStepTime += SIXTEENTH;
+    musicStep++;
+  }
+}
+
+function startMusic() {
+  initAudio();
+  if (ac.state === 'suspended') ac.resume();
+  if (musicPlaying) return;
+  musicPlaying = true;
+  musicStep = 0;
+  nextStepTime = ac.currentTime + 0.1;
+  musicLoop();
+  musicTimer = setInterval(musicLoop, 25);
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+}
+
+// ============================================================
+// UI
+// ============================================================
+
+function buildKnobs() {
+  const wrap = document.getElementById('params');
+  PARAMS.forEach(p => {
+    const knob = document.createElement('div');
+    knob.className = 'knob';
+    knob.innerHTML =
+      `<div class="dial" tabindex="0" role="slider" aria-label="${p.label}"
+            aria-valuemin="0" aria-valuemax="100"></div>
+       <div class="label">${p.label}</div>
+       <div class="value">${p.default}</div>`;
+    const dial = knob.querySelector('.dial');
+    const valEl = knob.querySelector('.value');
+
+    const render = () => {
+      const val = state[p.id];
+      const angle = -135 + (val / 100) * 270;
+      dial.style.setProperty('--angle', angle + 'deg');
+      valEl.textContent = Math.round(val);
+      dial.setAttribute('aria-valuenow', Math.round(val));
+      applyGlobalParams(); // volume / drama / budget are global; harmless for the rest
+    };
+    render();
+
+    let dragging = false, startY = 0, startVal = 0;
+    const onMove = e => {
+      if (!dragging) return;
+      const y = (e.touches ? e.touches[0].clientY : e.clientY);
+      const dv = (startY - y) * 0.6;
+      state[p.id] = Math.max(0, Math.min(100, startVal + dv));
+      render();
+      if (e.cancelable) e.preventDefault();
+    };
+    const onUp = () => {
+      dragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    const onDown = e => {
+      dragging = true;
+      startY = (e.touches ? e.touches[0].clientY : e.clientY);
+      startVal = state[p.id];
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+      e.preventDefault();
+    };
+    dial.addEventListener('mousedown', onDown);
+    dial.addEventListener('touchstart', onDown, { passive: false });
+
+    dial.addEventListener('wheel', e => {
+      e.preventDefault();
+      state[p.id] = Math.max(0, Math.min(100, state[p.id] - Math.sign(e.deltaY) * 3));
+      render();
+    }, { passive: false });
+    dial.addEventListener('keydown', e => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { state[p.id] = Math.min(100, state[p.id] + 2); render(); }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { state[p.id] = Math.max(0, state[p.id] - 2); render(); }
+    });
+
+    wrap.appendChild(knob);
+  });
+}
+
+// ---- Keyboard --------------------------------------------------------------
+const KEYS = [
+  { note: 'C',  black: false, kb: 'a' },
+  { note: 'C#', black: true,  kb: 'w' },
+  { note: 'D',  black: false, kb: 's' },
+  { note: 'D#', black: true,  kb: 'e' },
+  { note: 'E',  black: false, kb: 'd' },
+  { note: 'F',  black: false, kb: 'f' },
+  { note: 'F#', black: true,  kb: 't' },
+  { note: 'G',  black: false, kb: 'g' },
+  { note: 'G#', black: true,  kb: 'y' },
+  { note: 'A',  black: false, kb: 'h' },
+  { note: 'A#', black: true,  kb: 'u' },
+  { note: 'B',  black: false, kb: 'j' },
+  { note: 'C',  black: false, kb: 'k' },
+];
+
+const keyEls = {};
+const kbToMidi = {};
+
+function buildKeyboard() {
+  const kb = document.getElementById('keyboard');
+  const whiteIndex = [];
+  let w = 0;
+  KEYS.forEach((k, i) => { if (!k.black) { whiteIndex[i] = w; w++; } });
+  const whiteCount = w;
+
+  KEYS.forEach((k, i) => {
+    const midi = BASE_MIDI + i;
+    kbToMidi[k.kb] = midi;
+
+    const el = document.createElement('div');
+    el.className = 'key ' + (k.black ? 'black' : 'white');
+    el.innerHTML = `<span class="kb">${k.kb.toUpperCase()}</span>`;
+
+    if (k.black) {
+      const leftWhite = whiteIndex[i - 1];
+      el.style.left = ((leftWhite + 1) / whiteCount) * 100 + '%';
+    }
+
+    const down = e => { e.preventDefault(); noteOn(midi); };
+    const up = e => { e.preventDefault(); noteOff(midi); };
+    el.addEventListener('mousedown', down);
+    el.addEventListener('mouseup', up);
+    el.addEventListener('mouseleave', () => noteOff(midi));
+    el.addEventListener('touchstart', down, { passive: false });
+    el.addEventListener('touchend', up, { passive: false });
+
+    keyEls[midi] = el;
+    kb.appendChild(el);
+  });
+}
+
+function highlightKey(midi, on) {
+  const el = keyEls[midi];
+  if (el) el.classList.toggle('active', on);
+}
+
+const heldKeys = {};
+window.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  const midi = kbToMidi[e.key.toLowerCase()];
+  if (midi !== undefined && !heldKeys[e.key]) {
+    heldKeys[e.key] = true;
+    noteOn(midi);
+  }
+});
+window.addEventListener('keyup', e => {
+  const midi = kbToMidi[e.key.toLowerCase()];
+  if (midi !== undefined) {
+    heldKeys[e.key] = false;
+    noteOff(midi);
+  }
+});
+
+// ---- Output toggle ---------------------------------------------------------
+function buildOutputToggle() {
+  const wrap = document.getElementById('outputToggle');
+  const opts = wrap.querySelectorAll('.opt');
+  const setOut = out => {
+    state.output = out;
+    opts.forEach(o => o.classList.toggle('is-on', o.dataset.out === out));
+    wrap.setAttribute('aria-checked', out === 'hdmi');
+    applyGlobalParams();
+  };
+  opts.forEach(o => o.addEventListener('click', () => setOut(o.dataset.out)));
+  wrap.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setOut(state.output === 'hdmi' ? 'rca' : 'hdmi');
+    }
+  });
+}
+
+// ---- Music toggle ----------------------------------------------------------
+function buildMusicToggle() {
+  const wrap = document.getElementById('musicToggle');
+  const opts = wrap.querySelectorAll('.opt');
+  const setMusic = on => {
+    opts.forEach(o => o.classList.toggle('is-on', (o.dataset.music === 'on') === on));
+    wrap.setAttribute('aria-checked', on);
+    if (on) startMusic(); else stopMusic();
+  };
+  opts.forEach(o => o.addEventListener('click', () => setMusic(o.dataset.music === 'on')));
+  wrap.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMusic(!musicPlaying); }
+  });
+}
+
+// ---- Boot ------------------------------------------------------------------
+buildKnobs();
+buildKeyboard();
+buildOutputToggle();
+buildMusicToggle();

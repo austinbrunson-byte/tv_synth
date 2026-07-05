@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TV SYNTH</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo" aria-label="NTSC test pattern logo">
+      <!-- SMPTE-style color bars -->
+      <div class="bars">
+        <span style="background:#c0c0c0"></span>
+        <span style="background:#c0c000"></span>
+        <span style="background:#00c0c0"></span>
+        <span style="background:#00c000"></span>
+        <span style="background:#c000c0"></span>
+        <span style="background:#c00000"></span>
+        <span style="background:#0000c0"></span>
+      </div>
+      <div class="bars bars-lower">
+        <span style="background:#0000c0"></span>
+        <span style="background:#131313"></span>
+        <span style="background:#c000c0"></span>
+        <span style="background:#131313"></span>
+        <span style="background:#00c0c0"></span>
+        <span style="background:#131313"></span>
+        <span style="background:#c0c0c0"></span>
+      </div>
+    </div>
+    <div class="titleblock">
+      <h1>TV&nbsp;SYNTH</h1>
+      <p class="subtitle">broadcast sound effects generator</p>
+    </div>
+    <div class="toggles">
+      <div class="output" role="group" aria-label="Music bed">
+        <span class="output-label">MUSIC BED</span>
+        <div class="toggle" id="musicToggle" role="switch" aria-checked="false" tabindex="0">
+          <button class="opt is-on" data-music="off" type="button">OFF</button>
+          <button class="opt" data-music="on" type="button">ON</button>
+        </div>
+      </div>
+      <div class="output" role="group" aria-label="Output">
+        <span class="output-label">OUTPUT</span>
+        <div class="toggle" id="outputToggle" role="switch" aria-checked="true" tabindex="0">
+          <button class="opt" data-out="rca" type="button">RCA</button>
+          <button class="opt is-on" data-out="hdmi" type="button">HDMI</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" aria-label="Parameters">
+      <div class="params" id="params"><!-- knobs injected here --></div>
+    </section>
+
+    <section class="keyboard-wrap" aria-label="Keyboard">
+      <div class="keyboard" id="keyboard"><!-- keys injected here --></div>
+      <p class="hint">Click keys or use your computer keyboard:
+        <kbd>A</kbd><kbd>W</kbd><kbd>S</kbd><kbd>E</kbd><kbd>D</kbd><kbd>F</kbd><kbd>T</kbd><kbd>G</kbd><kbd>Y</kbd><kbd>H</kbd><kbd>U</kbd><kbd>J</kbd><kbd>K</kbd>
+      </p>
+    </section>
+  </main>
+
+  <script src="synth.js"></script>
+</body>
+</html>
