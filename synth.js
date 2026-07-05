@@ -51,6 +51,7 @@ let reverbGain = null;  // wet amount
 let musicBus = null;    // background music sum
 let duckGain = null;    // ducks the music when the synth plays
 let keepAlive = null;   // silent <audio> element that opens the OS audio session
+let fwNoiseBuf = null;  // reusable noise buffer for firework boom sounds
 
 function initAudio() {
   if (ac) return;
@@ -884,6 +885,49 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && ac && ac.state === 'suspended') ensurePlaying();
 });
 
+// A synthesized firework "boom": a lowpass-swept noise burst plus a low thump,
+// panned to where the burst appeared. Routed through the output compressor so
+// several at once don't clip.
+function fireworkBoom(pan) {
+  if (!ac || !comp) return;
+  const t = ac.currentTime;
+  if (!fwNoiseBuf) {
+    fwNoiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = fwNoiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const out = ac.createStereoPanner ? ac.createStereoPanner() : ac.createGain();
+  if (out.pan) out.pan.value = Math.max(-1, Math.min(1, pan || 0));
+  out.connect(comp);
+
+  // Boom: filtered noise sweeping down.
+  const dur = 0.35 + Math.random() * 0.3;
+  const src = ac.createBufferSource();
+  src.buffer = fwNoiseBuf; src.loop = true;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(800 + Math.random() * 700, t);
+  lp.frequency.exponentialRampToValueAtTime(110, t + dur);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.28, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(lp); lp.connect(g); g.connect(out);
+  src.start(t); src.stop(t + dur + 0.05);
+
+  // Thump: low sine drop for the body of the blast.
+  const o = ac.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+  const og = ac.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 0.3);
+}
+
 // ============================================================
 // FOURTH OF JULY — a blank page of fireworks
 // ============================================================
@@ -918,6 +962,7 @@ function buildFireworks() {
   }
 
   function explode(x, y, color) {
+    fireworkBoom((x / W) * 2 - 1);
     const n = 55 + (Math.random() * 45 | 0);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -962,6 +1007,7 @@ function buildFireworks() {
   }
 
   function open() {
+    ensurePlaying();
     overlay.hidden = false;
     resize();
     rockets = []; sparks = []; sinceLaunch = 100;
