@@ -650,6 +650,18 @@ function buildMusicToggle() {
   });
 }
 
+// ---- Audio unlock ----------------------------------------------------------
+// Browsers start an AudioContext "suspended" until a user gesture. noteOn/
+// startMusic already resume it, but this guarantees the context is created and
+// running on the very first interaction anywhere on the page (belt-and-braces
+// against autoplay policy = "loads but no sound").
+function unlockAudio() {
+  initAudio();
+  if (ac.state === 'suspended') ac.resume();
+}
+['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
+  window.addEventListener(evt, unlockAudio, { once: true }));
+
 // ---- Boot ------------------------------------------------------------------
 buildKnobs();
 buildKeyboard();
