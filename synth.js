@@ -390,9 +390,10 @@ function updateDuck() {
 // ============================================================
 // MUSIC — the ambient bed + HUMAN MUSIC (12 little songs)
 //
-// Every track is the same friendly arrangement — a soft pad, a light bass, and
-// a gentle arpeggio over a 4-chord loop — differing by key, chord colors, and
-// tempo. Scheduled with a look-ahead clock. Only one track plays at a time.
+// A style-driven step sequencer. Each track picks a pad style, a bass pattern,
+// an arp/comp pattern, timbres, an optional swing/meter, and an optional melody
+// line — so the twelve songs are genuinely different pieces, not one loop
+// transposed. Scheduled with a look-ahead clock; only one track plays at a time.
 // ============================================================
 let musicTimer = null;
 let musicStep = 0;        // sixteenth-note counter
@@ -410,26 +411,60 @@ const CH = {
 };
 const chord = (root, q) => CH[q].map(i => root + i);
 
-// The original ambient TV bumper.
+// The original ambient TV bumper (all defaults).
 const BED = {
-  bpm: 96, pad: 'triangle',
+  bpm: 96,
   prog: [chord(60, 'maj7'), chord(57, 'min7'), chord(65, 'maj7'), chord(55, 'dom7')],
 };
 
-// Twelve simple songs — Human Music 1..12. Each is a 4-chord loop.
+// Twelve songs — Human Music 1..12. Each combines a progression with a distinct
+// groove/instrumentation. Fields left out fall back to the defaults in playTrack.
 const SONGS = [
-  { bpm: 96,  pad: 'triangle', prog: [chord(60,'maj7'), chord(57,'min7'), chord(65,'maj7'), chord(55,'dom7')] }, // C  Am F  G
-  { bpm: 104, pad: 'sine',     prog: [chord(57,'min7'), chord(53,'maj7'), chord(60,'maj7'), chord(55,'dom7')] }, // Am F  C  G
-  { bpm: 88,  pad: 'triangle', prog: [chord(60,'maj'),  chord(55,'maj'),  chord(57,'min7'), chord(53,'maj7')] }, // C  G  Am F
-  { bpm: 108, pad: 'sine',     prog: [chord(62,'maj'),  chord(57,'maj'),  chord(59,'min7'), chord(55,'maj7')] }, // D  A  Bm G
-  { bpm: 84,  pad: 'triangle', prog: [chord(53,'maj7'), chord(60,'maj'),  chord(50,'min7'), chord(58,'maj7')] }, // F  C  Dm Bb
-  { bpm: 100, pad: 'sine',     prog: [chord(52,'min7'), chord(60,'maj'),  chord(55,'maj7'), chord(62,'dom7')] }, // Em C  G  D
-  { bpm: 92,  pad: 'triangle', prog: [chord(55,'maj'),  chord(62,'maj'),  chord(52,'min7'), chord(60,'maj7')] }, // G  D  Em C
-  { bpm: 80,  pad: 'sine',     prog: [chord(60,'maj'),  chord(53,'maj7'), chord(55,'dom7'), chord(53,'maj7')] }, // C  F  G  F
-  { bpm: 112, pad: 'triangle', prog: [chord(57,'min7'), chord(50,'min7'), chord(55,'dom7'), chord(60,'maj7')] }, // Am Dm G  C
-  { bpm: 98,  pad: 'sine',     prog: [chord(52,'maj'),  chord(59,'maj'),  chord(61,'min7'), chord(57,'maj7')] }, // E  B  C#m A
-  { bpm: 90,  pad: 'triangle', prog: [chord(58,'maj7'), chord(53,'maj'),  chord(55,'min7'), chord(51,'maj7')] }, // Bb F  Gm Eb
-  { bpm: 106, pad: 'sine',     prog: [chord(60,'maj'),  chord(64,'min7'), chord(53,'maj7'), chord(55,'dom7')] }, // C  Em F  G
+  // 1 — the classic friendly bumper.
+  { bpm: 96, prog: [chord(60,'maj7'), chord(57,'min7'), chord(65,'maj7'), chord(55,'dom7')] },
+  // 2 — swung lounge: walking bass, off-beat comp.
+  { bpm: 100, swing: 0.45, pad: 'stab', padWave: 'sine', bass: 'walk',
+    arp: 'offbeat', arpWave: 'sine',
+    prog: [chord(57,'min7'), chord(53,'maj7'), chord(60,'maj7'), chord(55,'dom7')] },
+  // 3 — a gentle waltz in 3/4.
+  { bpm: 132, beatsPerBar: 3, pad: 'waltz', bass: 'waltz', arp: 'up', arpGain: 0.038,
+    prog: [chord(60,'maj'), chord(55,'maj'), chord(57,'min7'), chord(53,'maj7')] },
+  // 4 — driving news theme: pulsing bass, busy 16th line, no pad.
+  { bpm: 120, pad: 'none', bass: 'pulse8', arp: 'sixteenth', arpWave: 'square',
+    arpGain: 0.03, arpCut: 4200,
+    prog: [chord(62,'maj'), chord(57,'maj'), chord(59,'min7'), chord(55,'maj7')] },
+  // 5 — a slow ballad with a melody over sparse pads.
+  { bpm: 72, padWave: 'sine', arp: 'none', melWave: 'triangle', melGain: 0.1,
+    mel: [[0,72,6],[8,69,6],[16,76,6],[24,72,6],[32,74,6],[40,69,6],[48,74,6],[56,70,10]],
+    prog: [chord(53,'maj7'), chord(60,'maj'), chord(50,'min7'), chord(58,'maj7')] },
+  // 6 — chiptune bounce: all square waves, hopping bass.
+  { bpm: 128, pad: 'offstab', padWave: 'square', padGain: 0.03, bass: 'octaves',
+    bassWave: 'square', arp: 'up', arpWave: 'square', arpGain: 0.035, arpCut: 5000,
+    prog: [chord(52,'min7'), chord(60,'maj'), chord(55,'maj7'), chord(62,'dom7')] },
+  // 7 — mysterious: low sine pad, descending arp.
+  { bpm: 88, swing: 0.15, padWave: 'sine', padOct: -12, padCut: 1400, arp: 'down',
+    arpWave: 'sine', arpGain: 0.04, arpCut: 2600,
+    prog: [chord(55,'maj'), chord(62,'maj'), chord(52,'min7'), chord(60,'maj7')] },
+  // 8 — bright pop: quarter bass, up-down arp.
+  { bpm: 112, pad: 'stab', bass: 'quarters', arp: 'updown',
+    prog: [chord(60,'maj'), chord(53,'maj7'), chord(55,'dom7'), chord(53,'maj7')] },
+  // 9 — lo-fi half-time: swung, off-beat keys.
+  { bpm: 76, swing: 0.3, bass: 'root13', arp: 'offbeat', arpWave: 'sine',
+    arpGain: 0.05, arpCut: 2400,
+    prog: [chord(57,'min7'), chord(50,'min7'), chord(55,'dom7'), chord(60,'maj7')] },
+  // 10 — a crisp march: stabbed chords on every beat.
+  { bpm: 104, pad: 'stab', padWave: 'sawtooth', padGain: 0.035, bass: 'quarters',
+    arp: 'chords', arpGain: 0.03,
+    prog: [chord(52,'maj'), chord(59,'maj'), chord(61,'min7'), chord(57,'maj7')] },
+  // 11 — jazzy swing: comping stabs, walking bass, up-down line.
+  { bpm: 108, swing: 0.55, pad: 'stab', padWave: 'sine', bass: 'walk', arp: 'updown',
+    arpGain: 0.04,
+    prog: [chord(58,'maj7'), chord(53,'maj'), chord(55,'min7'), chord(51,'maj7')] },
+  // 12 — an anthem: big pad, octave bass, a triumphant melody.
+  { bpm: 90, padGain: 0.06, bass: 'octaves', arp: 'up', arpGain: 0.04,
+    melWave: 'square', melGain: 0.085,
+    mel: [[0,67,8],[8,72,8],[16,71,8],[24,74,8],[32,72,8],[40,69,4],[44,72,4],[48,74,8],[56,79,8]],
+    prog: [chord(60,'maj'), chord(64,'min7'), chord(53,'maj7'), chord(55,'dom7')] },
 ];
 
 function songVoice(freq, time, dur, gain, type, opts = {}) {
@@ -449,31 +484,98 @@ function songVoice(freq, time, dur, gain, type, opts = {}) {
   o.stop(time + dur + 0.05);
 }
 
-function scheduleStep(step, time) {
-  const sixteenth = curCfg.sixteenth;
-  const prog = curCfg.prog;
-  const padType = curCfg.pad || 'triangle';
-  const chd = prog[Math.floor(step / 16) % prog.length];
-  const beat = step % 16;
+// --- Pattern generators (all read the current track's config) ---------------
+function padPattern(chd, beat, spb, t, s16) {
+  const style = curCfg.pad;
+  if (style === 'none') return;
+  const wave = curCfg.padWave || 'triangle';
+  const cut = curCfg.padCut || 2200;
+  const g = curCfg.padGain != null ? curCfg.padGain : 0.05;
+  const oct = curCfg.padOct || 0;
+  const play = (dur, gain) => chd.forEach(m =>
+    songVoice(midiToFreq(m + oct), t, dur, gain, wave, { attack: 0.05, cutoff: cut }));
+  if (style === 'stab') { if (beat % 4 === 0) play(s16 * 2, g * 1.1); }
+  else if (style === 'offstab') { if (beat % 4 === 2) play(s16 * 1.6, g * 1.1); }
+  else if (style === 'waltz') { if (beat === 4 || beat === 8) play(s16 * 2.5, g * 1.1); }
+  else if (beat === 0) play(s16 * (spb - 1), g); // 'sustain'
+}
 
-  if (beat === 0) {
-    // Pad: whole-bar soft chord.
-    chd.forEach(m =>
-      songVoice(midiToFreq(m), time, sixteenth * 15, 0.05, padType,
-                { attack: 0.08, cutoff: 2200 }));
-    // Bass root.
-    songVoice(midiToFreq(chd[0] - 12), time, sixteenth * 7, 0.14, 'sine',
-              { attack: 0.01, cutoff: 800 });
+function bassPattern(chd, beat, spb, t, s16) {
+  const style = curCfg.bass;
+  if (style === 'none') return;
+  const wave = curCfg.bassWave || 'sine';
+  const root = chd[0] - 12;
+  const hit = (m, dur, gain) =>
+    songVoice(midiToFreq(m), t, dur, gain, wave, { attack: 0.008, cutoff: 800 });
+  switch (style) {
+    case 'quarters': if (beat % 4 === 0) hit(root, s16 * 3.2, 0.13); break;
+    case 'octaves':
+      if (beat % 4 === 0) hit(root, s16 * 3.2, 0.13);
+      else if (beat % 4 === 2) hit(root + 12, s16 * 1.8, 0.09);
+      break;
+    case 'pulse8': if (beat % 2 === 0) hit(root, s16 * 1.5, 0.11); break;
+    case 'walk':
+      if (beat % 4 === 0) {
+        const tones = [chd[0], chd[1], chd[2], chd[0] + 12];
+        hit(tones[Math.floor(beat / 4) % tones.length] - 12, s16 * 3.2, 0.12);
+      }
+      break;
+    case 'waltz': if (beat === 0) hit(root, s16 * 3, 0.14); break;
+    default: // 'root13'
+      if (beat === 0) hit(root, s16 * 7, 0.14);
+      if (beat === Math.floor(spb / 2)) hit(root, s16 * 7, 0.11);
   }
-  if (beat === 8) {
-    songVoice(midiToFreq(chd[0] - 12), time, sixteenth * 7, 0.11, 'sine',
-              { attack: 0.01, cutoff: 800 });
+}
+
+function arpPattern(chd, beat, spb, t, s16, lstep) {
+  const style = curCfg.arp;
+  if (style === 'none') return;
+  const wave = curCfg.arpWave || 'triangle';
+  const oct = curCfg.arpOct != null ? curCfg.arpOct : 12;
+  const g = curCfg.arpGain != null ? curCfg.arpGain : 0.045;
+  const cut = curCfg.arpCut || 3500;
+  const L = chd.length;
+  const hit = (m, dur) =>
+    songVoice(midiToFreq(m + oct), t, dur, g, wave, { attack: 0.005, cutoff: cut });
+  switch (style) {
+    case 'down': if (beat % 2 === 0) hit(chd[(L - 1 - ((beat / 2) % L))], s16 * 1.6); break;
+    case 'updown':
+      if (beat % 2 === 0) {
+        const seq = [0, 1, 2, 3, 2, 1];
+        hit(chd[seq[Math.floor(lstep / 2) % seq.length] % L], s16 * 1.6);
+      }
+      break;
+    case 'offbeat': if (beat % 4 === 2) hit(chd[(beat / 2) % L], s16 * 1.4); break;
+    case 'sixteenth': hit(chd[lstep % L], s16 * 1.1); break;
+    case 'chords': if (beat % 4 === 0) chd.forEach(m => hit(m, s16 * 1.8)); break;
+    default: if (beat % 2 === 0) hit(chd[(beat / 2) % L], s16 * 1.6); // 'up'
   }
-  // Gentle arpeggio on the off-eighths.
-  if (beat % 2 === 0) {
-    const n = chd[(beat / 2) % chd.length] + 12;
-    songVoice(midiToFreq(n), time, sixteenth * 1.6, 0.045, 'triangle',
-              { attack: 0.005, cutoff: 3500 });
+}
+
+function scheduleStep(step, time) {
+  const s16 = curCfg.sixteenth;
+  const spb = curCfg.stepsPerBar;
+  const loopSteps = curCfg.prog.length * spb;
+  const lstep = ((step % loopSteps) + loopSteps) % loopSteps;
+  const chd = curCfg.prog[Math.floor(lstep / spb)];
+  const beat = lstep % spb;
+
+  // Swing: nudge the off-beat eighths later.
+  let t = time;
+  if (curCfg.swing && beat % 4 === 2) t += curCfg.swing * s16;
+
+  padPattern(chd, beat, spb, t, s16);
+  bassPattern(chd, beat, spb, t, s16);
+  arpPattern(chd, beat, spb, t, s16, lstep);
+
+  if (curCfg.mel) {
+    for (const m of curCfg.mel) {
+      if (m[0] === lstep) {
+        songVoice(midiToFreq(m[1]), t, s16 * m[2] * 0.9,
+                  curCfg.melGain || 0.09, curCfg.melWave || 'triangle',
+                  { attack: 0.006, cutoff: 3600 });
+      }
+    }
   }
 }
 
@@ -490,7 +592,9 @@ function playTrack(cfg, id) {
   initAudio();
   if (ac.state === 'suspended') ac.resume();
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
-  curCfg = Object.assign({ sixteenth: 60 / cfg.bpm / 4 }, cfg);
+  curCfg = Object.assign({ beatsPerBar: 4, pad: 'sustain', bass: 'root13', arp: 'up' }, cfg);
+  curCfg.sixteenth = 60 / curCfg.bpm / 4;
+  curCfg.stepsPerBar = curCfg.beatsPerBar * 4;
   currentTrackId = id;
   musicStep = 0;
   nextStepTime = ac.currentTime + 0.1;
