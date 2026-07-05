@@ -384,27 +384,51 @@ function updateDuck() {
 }
 
 // ============================================================
-// BACKGROUND MUSIC BED
-// A simple, friendly TV-bumper loop (I–vi–IV–V in C) built from a soft pad,
-// a light bass, and a gentle arpeggio. Scheduled with a look-ahead clock.
+// MUSIC — the ambient bed + HUMAN MUSIC (12 little songs)
+//
+// Every track is the same friendly arrangement — a soft pad, a light bass, and
+// a gentle arpeggio over a 4-chord loop — differing by key, chord colors, and
+// tempo. Scheduled with a look-ahead clock. Only one track plays at a time.
 // ============================================================
-let musicPlaying = false;
 let musicTimer = null;
-let musicStep = 0;      // sixteenth-note counter
+let musicStep = 0;        // sixteenth-note counter
 let nextStepTime = 0;
+let curCfg = null;        // config of the track currently playing
+let currentTrackId = null;// 'bed' | 'hm0'..'hm11' | null
 
-const BPM = 96;
-const SIXTEENTH = 60 / BPM / 4;
+// Chord = intervals over a root midi note.
+const CH = {
+  maj:  [0, 4, 7, 12],
+  min:  [0, 3, 7, 12],
+  dom7: [0, 4, 7, 10],
+  maj7: [0, 4, 7, 11],
+  min7: [0, 3, 7, 10],
+};
+const chord = (root, q) => CH[q].map(i => root + i);
 
-// One chord per bar (16 steps). Voiced as midi note sets.
-const PROG = [
-  [60, 64, 67, 71], // Cmaj7
-  [57, 60, 64, 67], // Am7
-  [65, 69, 72, 76], // Fmaj7
-  [55, 62, 65, 71], // G (with color)
+// The original ambient TV bumper.
+const BED = {
+  bpm: 96, pad: 'triangle',
+  prog: [chord(60, 'maj7'), chord(57, 'min7'), chord(65, 'maj7'), chord(55, 'dom7')],
+};
+
+// Twelve simple songs — Human Music 1..12. Each is a 4-chord loop.
+const SONGS = [
+  { bpm: 96,  pad: 'triangle', prog: [chord(60,'maj7'), chord(57,'min7'), chord(65,'maj7'), chord(55,'dom7')] }, // C  Am F  G
+  { bpm: 104, pad: 'sine',     prog: [chord(57,'min7'), chord(53,'maj7'), chord(60,'maj7'), chord(55,'dom7')] }, // Am F  C  G
+  { bpm: 88,  pad: 'triangle', prog: [chord(60,'maj'),  chord(55,'maj'),  chord(57,'min7'), chord(53,'maj7')] }, // C  G  Am F
+  { bpm: 108, pad: 'sine',     prog: [chord(62,'maj'),  chord(57,'maj'),  chord(59,'min7'), chord(55,'maj7')] }, // D  A  Bm G
+  { bpm: 84,  pad: 'triangle', prog: [chord(53,'maj7'), chord(60,'maj'),  chord(50,'min7'), chord(58,'maj7')] }, // F  C  Dm Bb
+  { bpm: 100, pad: 'sine',     prog: [chord(52,'min7'), chord(60,'maj'),  chord(55,'maj7'), chord(62,'dom7')] }, // Em C  G  D
+  { bpm: 92,  pad: 'triangle', prog: [chord(55,'maj'),  chord(62,'maj'),  chord(52,'min7'), chord(60,'maj7')] }, // G  D  Em C
+  { bpm: 80,  pad: 'sine',     prog: [chord(60,'maj'),  chord(53,'maj7'), chord(55,'dom7'), chord(53,'maj7')] }, // C  F  G  F
+  { bpm: 112, pad: 'triangle', prog: [chord(57,'min7'), chord(50,'min7'), chord(55,'dom7'), chord(60,'maj7')] }, // Am Dm G  C
+  { bpm: 98,  pad: 'sine',     prog: [chord(52,'maj'),  chord(59,'maj'),  chord(61,'min7'), chord(57,'maj7')] }, // E  B  C#m A
+  { bpm: 90,  pad: 'triangle', prog: [chord(58,'maj7'), chord(53,'maj'),  chord(55,'min7'), chord(51,'maj7')] }, // Bb F  Gm Eb
+  { bpm: 106, pad: 'sine',     prog: [chord(60,'maj'),  chord(64,'min7'), chord(53,'maj7'), chord(55,'dom7')] }, // C  Em F  G
 ];
 
-function bedVoice(freq, time, dur, gain, type, opts = {}) {
+function songVoice(freq, time, dur, gain, type, opts = {}) {
   const o = ac.createOscillator();
   o.type = type;
   o.frequency.value = freq;
@@ -421,55 +445,66 @@ function bedVoice(freq, time, dur, gain, type, opts = {}) {
   o.stop(time + dur + 0.05);
 }
 
-function scheduleBedStep(step, time) {
-  const bar = Math.floor(step / 16) % PROG.length;
-  const chord = PROG[bar];
+function scheduleStep(step, time) {
+  const sixteenth = curCfg.sixteenth;
+  const prog = curCfg.prog;
+  const padType = curCfg.pad || 'triangle';
+  const chd = prog[Math.floor(step / 16) % prog.length];
   const beat = step % 16;
 
   if (beat === 0) {
     // Pad: whole-bar soft chord.
-    chord.forEach(m =>
-      bedVoice(midiToFreq(m), time, SIXTEENTH * 15, 0.05, 'triangle',
-               { attack: 0.08, cutoff: 2200 }));
+    chd.forEach(m =>
+      songVoice(midiToFreq(m), time, sixteenth * 15, 0.05, padType,
+                { attack: 0.08, cutoff: 2200 }));
     // Bass root.
-    bedVoice(midiToFreq(chord[0] - 12), time, SIXTEENTH * 7, 0.14, 'sine',
-             { attack: 0.01, cutoff: 800 });
+    songVoice(midiToFreq(chd[0] - 12), time, sixteenth * 7, 0.14, 'sine',
+              { attack: 0.01, cutoff: 800 });
   }
   if (beat === 8) {
-    bedVoice(midiToFreq(chord[0] - 12), time, SIXTEENTH * 7, 0.11, 'sine',
-             { attack: 0.01, cutoff: 800 });
+    songVoice(midiToFreq(chd[0] - 12), time, sixteenth * 7, 0.11, 'sine',
+              { attack: 0.01, cutoff: 800 });
   }
   // Gentle arpeggio on the off-eighths.
   if (beat % 2 === 0) {
-    const n = chord[(beat / 2) % chord.length] + 12;
-    bedVoice(midiToFreq(n), time, SIXTEENTH * 1.6, 0.045, 'triangle',
-             { attack: 0.005, cutoff: 3500 });
+    const n = chd[(beat / 2) % chd.length] + 12;
+    songVoice(midiToFreq(n), time, sixteenth * 1.6, 0.045, 'triangle',
+              { attack: 0.005, cutoff: 3500 });
   }
 }
 
 function musicLoop() {
   while (nextStepTime < ac.currentTime + 0.12) {
-    scheduleBedStep(musicStep, nextStepTime);
-    nextStepTime += SIXTEENTH;
+    scheduleStep(musicStep, nextStepTime);
+    nextStepTime += curCfg.sixteenth;
     musicStep++;
   }
 }
 
-function startMusic() {
+// Start a track, replacing whatever was playing (only one at a time).
+function playTrack(cfg, id) {
   initAudio();
   if (ac.state === 'suspended') ac.resume();
-  if (musicPlaying) return;
-  musicPlaying = true;
+  if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  curCfg = Object.assign({ sixteenth: 60 / cfg.bpm / 4 }, cfg);
+  currentTrackId = id;
   musicStep = 0;
   nextStepTime = ac.currentTime + 0.1;
   musicLoop();
   musicTimer = setInterval(musicLoop, 25);
+  refreshMusicUI();
 }
 
-function stopMusic() {
-  musicPlaying = false;
+function stopTrack() {
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  curCfg = null;
+  currentTrackId = null;
+  refreshMusicUI();
 }
+
+// Bed toggle wrappers.
+function startMusic() { playTrack(BED, 'bed'); }
+function stopMusic() { if (currentTrackId === 'bed') stopTrack(); }
 
 // ============================================================
 // UI
@@ -635,19 +670,57 @@ function buildOutputToggle() {
   });
 }
 
-// ---- Music toggle ----------------------------------------------------------
+// ---- Music UI (bed toggle + Human Music grid) ------------------------------
+// One source of truth: refreshMusicUI() paints both from currentTrackId.
+let bedToggleEl = null;
+let songBtns = [];
+
+function refreshMusicUI() {
+  if (bedToggleEl) {
+    const on = currentTrackId === 'bed';
+    bedToggleEl.querySelectorAll('.opt').forEach(o =>
+      o.classList.toggle('is-on', (o.dataset.music === 'on') === on));
+    bedToggleEl.setAttribute('aria-checked', on);
+  }
+  songBtns.forEach((btn, i) =>
+    btn.classList.toggle('is-on', currentTrackId === 'hm' + i));
+}
+
 function buildMusicToggle() {
-  const wrap = document.getElementById('musicToggle');
-  const opts = wrap.querySelectorAll('.opt');
-  const setMusic = on => {
-    opts.forEach(o => o.classList.toggle('is-on', (o.dataset.music === 'on') === on));
-    wrap.setAttribute('aria-checked', on);
-    if (on) startMusic(); else stopMusic();
-  };
+  bedToggleEl = document.getElementById('musicToggle');
+  const opts = bedToggleEl.querySelectorAll('.opt');
+  const setMusic = on => { if (on) startMusic(); else stopMusic(); };
   opts.forEach(o => o.addEventListener('click', () => setMusic(o.dataset.music === 'on')));
-  wrap.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMusic(!musicPlaying); }
+  bedToggleEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setMusic(currentTrackId !== 'bed');
+    }
   });
+  refreshMusicUI();
+}
+
+// ---- Human Music: 12 playable songs ----------------------------------------
+function buildHumanMusic() {
+  const grid = document.getElementById('humanMusic');
+  songBtns = [];
+  SONGS.forEach((song, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hm-btn';
+    btn.innerHTML = `<span class="hm-num">${i + 1}</span>
+                     <span class="hm-name">Human Music ${i + 1}</span>`;
+    btn.setAttribute('aria-label', `Human Music ${i + 1}`);
+    btn.addEventListener('click', () => {
+      if (currentTrackId === 'hm' + i) stopTrack();
+      else playTrack(song, 'hm' + i);
+    });
+    songBtns.push(btn);
+    grid.appendChild(btn);
+  });
+
+  const stop = document.getElementById('humanMusicStop');
+  if (stop) stop.addEventListener('click', () => stopTrack());
 }
 
 // ---- Audio unlock ----------------------------------------------------------
@@ -667,3 +740,4 @@ buildKnobs();
 buildKeyboard();
 buildOutputToggle();
 buildMusicToggle();
+buildHumanMusic();

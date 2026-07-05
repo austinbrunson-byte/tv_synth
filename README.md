@@ -23,6 +23,15 @@ Each knob (drag up/down, scroll, or arrow keys) maps to real synthesis:
 | **Budget** | Production value: low = cheap lo-fi square, high = lush detuned supersaw. |
 | **Volume** | Master output level. |
 
+## Music
+
+- **Music Bed** — an ambient TV-bumper loop you can toggle on/off.
+- **Human Music** — twelve simple songs (Human Music 1–12), each a short 4-chord
+  loop in its own key and tempo. Click a number to play it, click again (or
+  **Stop**) to end it. Only one track plays at a time.
+
+Any playing track ducks under your synth notes and swells back when you release.
+
 Sequencing comes later — for now it's a live instrument.
 
 ## Files
