@@ -884,9 +884,109 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && ac && ac.state === 'suspended') ensurePlaying();
 });
 
+// ============================================================
+// FOURTH OF JULY — a blank page of fireworks
+// ============================================================
+function buildFireworks() {
+  const overlay = document.getElementById('fireworks');
+  const canvas = document.getElementById('fireworksCanvas');
+  const openBtn = document.getElementById('fireworksOpen');
+  const backBtn = document.getElementById('fireworksBack');
+  const ctx = canvas.getContext('2d');
+
+  let raf = null, W = 0, H = 0, dpr = 1;
+  let rockets = [], sparks = [], sinceLaunch = 0;
+  const COLORS = ['#ff3b3b', '#ffffff', '#4d7bff', '#ffd23f', '#ff7ac2'];
+  const GRAV = 0.06;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function launch() {
+    const x = W * (0.12 + Math.random() * 0.76);
+    const targetY = H * (0.12 + Math.random() * 0.4);
+    rockets.push({
+      x, y: H + 4, targetY,
+      vx: (Math.random() - 0.5) * 1.4,
+      vy: -Math.sqrt(2 * GRAV * (H - targetY)),
+      color: COLORS[(Math.random() * COLORS.length) | 0],
+    });
+  }
+
+  function explode(x, y, color) {
+    const n = 55 + (Math.random() * 45 | 0);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = Math.random() * 3.6 + 0.4;
+      sparks.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        color: Math.random() < 0.2 ? '#ffffff' : color,
+        life: 1, decay: 0.008 + Math.random() * 0.013,
+      });
+    }
+  }
+
+  function frame() {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(5,6,15,0.25)';          // fade for trails
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';     // additive glow
+
+    if (++sinceLaunch > 20) {
+      launch(); sinceLaunch = 0;
+      if (Math.random() < 0.45) launch();
+    }
+
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      r.x += r.vx; r.y += r.vy; r.vy += GRAV;
+      ctx.fillStyle = r.color;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 2.2, 0, Math.PI * 2); ctx.fill();
+      if (r.vy >= 0 || r.y <= r.targetY) { explode(r.x, r.y, r.color); rockets.splice(i, 1); }
+    }
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      s.x += s.vx; s.y += s.vy; s.vy += GRAV * 0.5; s.vx *= 0.99; s.vy *= 0.99;
+      s.life -= s.decay;
+      if (s.life <= 0) { sparks.splice(i, 1); continue; }
+      ctx.globalAlpha = Math.max(0, s.life);
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    raf = requestAnimationFrame(frame);
+  }
+
+  function open() {
+    overlay.hidden = false;
+    resize();
+    rockets = []; sparks = []; sinceLaunch = 100;
+    for (let i = 0; i < 3; i++) launch();
+    window.addEventListener('resize', resize);
+    if (!raf) raf = requestAnimationFrame(frame);
+  }
+  function close() {
+    overlay.hidden = true;
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    rockets = []; sparks = [];
+    window.removeEventListener('resize', resize);
+  }
+
+  openBtn.addEventListener('click', open);
+  backBtn.addEventListener('click', close);
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !overlay.hidden) close();
+  });
+}
+
 // ---- Boot ------------------------------------------------------------------
 buildKnobs();
 buildKeyboard();
 buildOutputToggle();
 buildMusicToggle();
 buildHumanMusic();
+buildFireworks();

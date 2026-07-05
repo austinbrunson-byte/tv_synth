@@ -34,6 +34,7 @@
       <p class="subtitle">broadcast sound effects generator</p>
     </div>
     <div class="toggles">
+      <button class="fw-open" id="fireworksOpen" type="button" aria-label="Fourth of July fireworks">🎆&nbsp;4TH&nbsp;OF&nbsp;JULY</button>
       <div class="output" role="group" aria-label="Music bed">
         <span class="output-label">MUSIC BED</span>
         <div class="toggle" id="musicToggle" role="switch" aria-checked="false" tabindex="0">
@@ -71,6 +72,12 @@
       </p>
     </section>
   </main>
+
+  <div class="fireworks-overlay" id="fireworks" hidden>
+    <canvas id="fireworksCanvas"></canvas>
+    <div class="fw-greeting">HAPPY&nbsp;4<span class="fw-sup">TH</span>&nbsp;OF&nbsp;JULY</div>
+    <button class="fw-back" id="fireworksBack" type="button">← BACK</button>
+  </div>
 
   <script src="synth.js"></script>
 </body>
