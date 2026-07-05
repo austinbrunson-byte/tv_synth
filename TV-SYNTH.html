@@ -391,12 +391,12 @@ kbd {
 // ============================================================
 
 const PARAMS = [
-  { id: 'drama',   label: 'Drama',           default: 55 },
-  { id: 'intrigue',label: 'Intrigue',        default: 40 },
-  { id: 'next',    label: 'Coming Up Next',  default: 30 },
-  { id: 'vibe',    label: 'Vibe',            default: 50 },
-  { id: 'budget',  label: 'Budget',          default: 60 },
-  { id: 'volume',  label: 'Volume',          default: 70 },
+  { id: 'drama',   label: 'Drama',           default: 30 },
+  { id: 'intrigue',label: 'Intrigue',        default: 20 },
+  { id: 'next',    label: 'Coming Up Next',  default: 25 },
+  { id: 'vibe',    label: 'Vibe',            default: 55 },
+  { id: 'budget',  label: 'Budget',          default: 70 },
+  { id: 'volume',  label: 'Volume',          default: 75 },
 ];
 
 const state = {};
@@ -506,13 +506,15 @@ function applyGlobalParams() {
   const t = ac.currentTime;
   master.gain.setTargetAtTime(n01(state.volume) * 0.85, t, 0.02);
 
-  // Cheap productions distort and lose their sparkle. Low BUDGET => more grit.
-  const lofi = 1 - n01(state.budget);
-  budgetDrive.curve = makeDriveCurve(lofi * 0.9);
-  preMaster.gain.setTargetAtTime(0.7 - lofi * 0.15, t, 0.02);
+  // Cheap productions distort. Only the bottom half of BUDGET adds grit, so
+  // normal/high budget stays clean.
+  const budget = n01(state.budget);
+  const grit = Math.max(0, 0.5 - budget) * 1.7; // 0 at budget>=0.5
+  budgetDrive.curve = makeDriveCurve(grit);
+  preMaster.gain.setTargetAtTime(0.72 - grit * 0.12, t, 0.02);
 
-  // Big rooms cost money and drama loves a tail. Wet from DRAMA + BUDGET polish.
-  const wet = n01(state.drama) * 0.55 + n01(state.budget) * 0.18;
+  // Big rooms cost money and drama loves a tail — but keep notes clear by default.
+  const wet = n01(state.drama) * 0.4 + budget * 0.08;
   reverbGain.gain.setTargetAtTime(wet, t, 0.02);
 
   // OUTPUT: HDMI = clean full-band + firm compression (loud, clear, controlled).
@@ -565,7 +567,7 @@ function buildVoice(midi) {
   const baseCut = 350 + (1 - vibe) * 5200 + next * 4500;
   const openCut = baseCut + 1800 + drama * 6000 + next * 6000;
   filter.frequency.value = baseCut;
-  filter.Q.value = 0.7 + intrigue * 9 + drama * 3;
+  filter.Q.value = 0.7 + intrigue * 5 + drama * 2;
   filter.connect(voiceGain);
 
   // --- helper: one oscillator layer -------------------------------------
@@ -602,45 +604,45 @@ function buildVoice(midi) {
   const rootType = budget < 0.33 ? 'square' : (next > 0.45 ? 'sawtooth' : 'triangle');
   // Cheap gear drifts out of tune.
   const detuneCheap = (1 - budget) * (Math.random() * 24 - 12);
-  layer(rootType, rootFreq, 0.5, { detune: detuneCheap, glide: riser });
+  // The played note always leads — everything else is subordinate to it.
+  layer(rootType, rootFreq, 0.6, { detune: detuneCheap, glide: riser });
 
   // BUDGET width — extra detuned voices panned L/R = expensive stereo strings.
   if (budget > 0.28) {
-    const spread = 6 + budget * 22;
-    layer('sawtooth', rootFreq, 0.22 * budget, { detune: +spread, pan: -0.6, glide: riser });
-    layer('sawtooth', rootFreq, 0.22 * budget, { detune: -spread, pan: +0.6, glide: riser });
+    const spread = 6 + budget * 18;
+    layer('sawtooth', rootFreq, 0.14 * budget, { detune: +spread, pan: -0.6, glide: riser });
+    layer('sawtooth', rootFreq, 0.14 * budget, { detune: -spread, pan: +0.6, glide: riser });
   }
 
   // ---------------------------------------------------------------------
-  // DRAMA — the sting. Stacked harmony (minor unless VIBE warms it to major),
-  // fifth, a low brass-ish body, plus a sub "boom" that drops in like an impact.
+  // DRAMA — the sting. A consonant triad (minor unless VIBE warms it to major)
+  // plus a sub "boom". Quiet at low DRAMA so a note stays a note; big when cranked.
   // ---------------------------------------------------------------------
-  if (drama > 0.08) {
-    const thirdIsMajor = vibe > 0.55;            // VIBE decides the color
-    const third = thirdIsMajor ? 4 : 3;
-    layer('sawtooth', semi(third), 0.32 * drama, { glide: riser });
-    layer('sawtooth', semi(7),     0.30 * drama, { glide: riser });
-    // Impact boom: sine that pitch-drops fast, then a steady sub underneath.
+  if (drama > 0.1) {
+    const third = vibe > 0.55 ? 4 : 3;           // VIBE decides major/minor color
+    layer('sawtooth', semi(third), 0.16 * drama, { glide: riser });
+    layer('sawtooth', semi(7),     0.16 * drama, { glide: riser });
+    // Impact boom: sine that pitch-drops fast into a steady sub.
     const boom = ac.createOscillator();
     boom.type = 'sine';
     boom.frequency.setValueAtTime(rootFreq, t);
     boom.frequency.exponentialRampToValueAtTime(rootFreq / 2, t + 0.12);
     const bg = ac.createGain();
-    bg.gain.value = 0.55 * drama;
+    bg.gain.value = 0.3 * drama;
     boom.connect(bg); bg.connect(voiceGain);
     boom.start(t);
     oscs.push(boom);
   }
 
   // ---------------------------------------------------------------------
-  // COMING UP NEXT — bright octave brass on top + a noise whoosh transient.
+  // COMING UP NEXT — a bright octave on top + a noise whoosh transient.
   // ---------------------------------------------------------------------
-  if (next > 0.1) {
-    layer('sawtooth', semi(12), 0.24 * next, { glide: riser });
-    if (next > 0.5) layer('square', semi(19), 0.12 * next, { glide: riser });
+  if (next > 0.12) {
+    layer('sawtooth', semi(12), 0.14 * next, { glide: riser });
+    if (next > 0.6) layer('square', semi(19), 0.08 * next, { glide: riser });
 
     // Whoosh: short bandpassed noise sweeping upward, straight to the dry bus.
-    const dur = 0.28 + next * 0.25;
+    const dur = 0.25 + next * 0.25;
     const nb = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
     const nd = nb.getChannelData(0);
     for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -653,7 +655,7 @@ function buildVoice(midi) {
     bp.frequency.exponentialRampToValueAtTime(4000 + next * 4000, t + dur);
     const ng = ac.createGain();
     ng.gain.setValueAtTime(0.0001, t);
-    ng.gain.linearRampToValueAtTime(0.18 * next, t + 0.03);
+    ng.gain.linearRampToValueAtTime(0.1 * next, t + 0.03);
     ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     noise.connect(bp); bp.connect(ng); ng.connect(dryBus);
     noise.start(t);
@@ -661,11 +663,12 @@ function buildVoice(midi) {
   }
 
   // ---------------------------------------------------------------------
-  // INTRIGUE — a cold metallic bell a tritone away, quiet and wavering.
+  // INTRIGUE — unease. A high, quiet shimmer plus a faint tritone that only
+  // creeps in when you push it. Kept low so it colors rather than clashes.
   // ---------------------------------------------------------------------
   if (intrigue > 0.12) {
-    layer('triangle', semi(6),  0.16 * intrigue, { detune: +4 });
-    layer('sine',     semi(18), 0.10 * intrigue);
+    layer('sine', semi(19), 0.07 * intrigue);              // airy fifth-above-octave
+    if (intrigue > 0.35) layer('triangle', semi(6), 0.05 * intrigue, { detune: +4 }); // faint tritone
   }
 
   voiceGain.connect(dryBus);
@@ -676,7 +679,7 @@ function buildVoice(midi) {
     lfo.type = 'sine';
     lfo.frequency.value = 2.5 + intrigue * 4.5;
     const lg = ac.createGain();
-    lg.gain.value = intrigue * 14; // cents
+    lg.gain.value = intrigue * 9; // cents
     lfo.connect(lg);
     oscs.forEach(o => { if (o.detune) lg.connect(o.detune); });
     lfo.start(t);
@@ -697,12 +700,13 @@ function buildVoice(midi) {
   }
 
   // --- Amp + filter envelopes -------------------------------------------
-  // NEXT = punchy pluck (instant attack). DRAMA = orchestral swell + long tail.
-  const attack  = 0.003 + (1 - next) * (0.02 + drama * 0.55);
-  const peak    = 0.30;
-  const sustain = peak * (0.30 + next * 0.35);
-  const decayTo = attack + 0.12 + next * 0.25;
-  const release = 0.18 + drama * 2.6 + budget * 0.5;
+  // Snappy by default so notes are responsive; DRAMA adds an orchestral swell
+  // and a long tail, NEXT keeps the attack instant and punchy.
+  const attack  = 0.004 + (1 - next) * (0.012 + drama * 0.28);
+  const peak    = 0.34;
+  const sustain = peak * (0.45 + next * 0.3);
+  const decayTo = attack + 0.1 + next * 0.2;
+  const release = 0.16 + drama * 1.8 + budget * 0.3;
 
   voiceGain.gain.setValueAtTime(0, t);
   voiceGain.gain.linearRampToValueAtTime(peak, t + attack);
@@ -1100,6 +1104,14 @@ function buildHumanMusic() {
 function unlockAudio() {
   initAudio();
   if (ac.state === 'suspended') ac.resume();
+  // iOS/Safari won't produce sound until a source has actually run inside a
+  // gesture — kick a one-sample silent buffer to fully unlock output.
+  try {
+    const s = ac.createBufferSource();
+    s.buffer = ac.createBuffer(1, 1, ac.sampleRate);
+    s.connect(ac.destination);
+    s.start(0);
+  } catch (e) {}
 }
 ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
   window.addEventListener(evt, unlockAudio, { once: true }));
