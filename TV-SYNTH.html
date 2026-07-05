@@ -419,6 +419,7 @@ let reverb = null;      // convolver tail
 let reverbGain = null;  // wet amount
 let musicBus = null;    // background music sum
 let duckGain = null;    // ducks the music when the synth plays
+let keepAlive = null;   // silent <audio> element that opens the OS audio session
 
 function initAudio() {
   if (ac) return;
@@ -458,7 +459,36 @@ function initAudio() {
   musicBus.connect(duckGain);
   duckGain.connect(comp); // shares the output compressor with the synth
 
+  // Some browsers/OSes keep Web Audio silent until a *media element* has opened
+  // the output session (the classic "no sound until I play a video in another
+  // tab"). Play a silent looping clip alongside, which opens that session for us.
+  keepAlive = new Audio(makeSilentWavUrl());
+  keepAlive.loop = true;
+  keepAlive.preload = 'auto';
+
   applyGlobalParams();
+}
+
+// A short silent mono WAV as an object URL, for the keep-alive element.
+function makeSilentWavUrl() {
+  const sr = 8000, n = sr * 0.25;           // 0.25s of silence
+  const buf = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true);
+  dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  w(36, 'data'); dv.setUint32(40, n * 2, true); // samples already zero (silent)
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+// Make sure the context is running and the OS audio session is open. Safe to
+// call on every interaction.
+function ensurePlaying() {
+  if (!ac) initAudio();
+  if (ac.state === 'suspended') ac.resume();
+  if (keepAlive) { const p = keepAlive.play(); if (p) p.catch(() => {}); }
 }
 
 // Amplitude-quantizing curve = genuine (light) bit-crush. `levels` lower = crunchier.
@@ -721,8 +751,7 @@ function buildVoice(midi) {
 }
 
 function noteOn(midi) {
-  initAudio();
-  if (ac.state === 'suspended') ac.resume();
+  ensurePlaying();
   if (activeVoices[midi]) return;
   applyGlobalParams();
   activeVoices[midi] = buildVoice(midi);
@@ -958,8 +987,7 @@ function musicLoop() {
 
 // Start a track, replacing whatever was playing (only one at a time).
 function playTrack(cfg, id) {
-  initAudio();
-  if (ac.state === 'suspended') ac.resume();
+  ensurePlaying();
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
   curCfg = Object.assign({ beatsPerBar: 4, pad: 'sustain', bass: 'root13', arp: 'up' }, cfg);
   curCfg.sixteenth = 60 / curCfg.bpm / 4;
@@ -1206,8 +1234,7 @@ function buildHumanMusic() {
 // running on the very first interaction anywhere on the page (belt-and-braces
 // against autoplay policy = "loads but no sound").
 function unlockAudio() {
-  initAudio();
-  if (ac.state === 'suspended') ac.resume();
+  ensurePlaying();
   // iOS/Safari won't produce sound until a source has actually run inside a
   // gesture — kick a one-sample silent buffer to fully unlock output.
   try {
@@ -1217,8 +1244,14 @@ function unlockAudio() {
     s.start(0);
   } catch (e) {}
 }
+// Not { once:true }: some browsers reject the first play() promise, so keep
+// re-asserting on every early interaction until the session truly opens.
 ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
-  window.addEventListener(evt, unlockAudio, { once: true }));
+  window.addEventListener(evt, unlockAudio));
+// Re-open the context if the tab was backgrounded and suspended.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && ac && ac.state === 'suspended') ensurePlaying();
+});
 
 // ---- Boot ------------------------------------------------------------------
 buildKnobs();
